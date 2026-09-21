@@ -1,0 +1,1556 @@
+{
+  "name": "Baron AI - Lead Finder + Visibility Audit (Combined)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# \ud83d\udfe2 READ ME FIRST \u2014 Lead Finder + Visibility Audit (combined)\n\n**Top half (this section):** finds local businesses, checks their websites, scores them 0\u2013100, drafts an honest outreach pack, saves everything to Google Sheets for MANUAL review. Nothing is ever sent to a prospect automatically.\n\n**Bottom half (scroll down):** your existing AI Visibility Audit \u2014 unchanged. It now starts from EITHER its form (default: you pick a lead from the sheet and submit it) OR automatically for the top Hot Lead when AUTO_AUDIT_HOT_LEADS is switched on.\n\n## Setup checklist:\n**1. Credentials** (Settings \u2192 Credentials):\n- `Google Places API Key` \u2192 Header Auth \u2192 Name: `X-Goog-Api-Key` (enable *Places API (New)* in Google Cloud)\n- `Anthropic API Key` \u2192 Header Auth \u2192 Name: `x-api-key`\n- `Perplexity API Key` \u2192 Header Auth \u2192 Name: `Authorization`, Value `Bearer pplx-...` (audit)\n- `OpenAI API Key` \u2192 Header Auth \u2192 Name: `Authorization`, Value `Bearer sk-...` (audit)\n- `Google Sheets account` \u2192 OAuth2\n- `Gmail account` \u2192 OAuth2\n- `Telegram Bot` \u2192 optional (run summary)\n\n**2. Create the leads Google Sheet** \u2014 headers in the Sheet sticky note (right). Paste its ID + URL into `EDIT THIS SECTION FIRST`.\n\n**3. Re-select credentials** in every node showing a red \u26a0 after import.\n\n**4. Edit `EDIT THIS SECTION FIRST`** \u2014 location, business type, modes, your company details.\n\n**5. Keep TESTING_MODE: true** for first runs (3 leads, TEST rows, dummy data if APIs missing, auto-audit blocked).\n\n\u25b6 Run: click *Execute workflow* on the Manual Trigger. Weekly Schedule Trigger ships DISABLED.",
+        "height": 860,
+        "width": 460,
+        "color": 4
+      },
+      "id": "note-readme",
+      "name": "Note - READ ME FIRST",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1980,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \u25b6 TRIGGERS\n\n**Manual Trigger** \u2014 click *Execute workflow* any time you want a batch of leads.\n\n**Schedule Trigger** \u2014 weekly (Monday 08:00). It is **disabled** by default so nothing runs behind your back. Right-click the node \u2192 *Enable* to switch it on. The workflow itself must also be Active (top-right toggle) for schedules to fire.\n\nTip: run manually per business type first (change `business_category` in the config, run, change, run) \u2014 one category per run gives the cleanest lead lists.",
+        "height": 340,
+        "width": 360,
+        "color": 5
+      },
+      "id": "note-triggers",
+      "name": "Note - Triggers",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1480,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udfe1 EDIT THIS SECTION FIRST\n\n**This is where you change the business type or location \u2014 usually the only node you touch.**\n\n- `target_location` / `target_country` \u2014 default Birmingham, United Kingdom\n- `business_category` \u2014 default electricians (or dentists, beauty salons, car garages, estate agents, accountants, private clinics, restaurants...)\n- `max_leads`, `min_rating`, `min_reviews`, `must_have_website`\n- `google_sheet_id` + `google_sheet_url` + `sheet_name` \u2014 your CRM (Google Sheets)\n\n**THE THREE MODES:**\n- `TESTING_MODE: true` \u2192 3 leads only, TEST rows, dummy data if APIs missing, no auto-audit. Set false to go LIVE.\n- `REVIEW_MODE: true` (default) \u2192 find \u2192 score \u2192 draft outreach \u2192 save \u2192 WAIT for your manual review. This is the safe default.\n- `AUTO_AUDIT_HOT_LEADS: false` (default) \u2192 set true and each LIVE run also pushes its TOP Hot Lead through the full Visibility Audit automatically (one per run, to control cost). Report goes to `notify_email`.\n\n- Company details + `outreach_tone` \u2014 used in the drafted messages\n- `notify_email` + `telegram_chat_id` \u2014 run summary destinations",
+        "height": 660,
+        "width": 420,
+        "color": 3
+      },
+      "id": "note-config",
+      "name": "Note - Edit This First",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1060,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udd0e LEAD SOURCES\n\n**Default: Google Places API (New) Text Search.** Credential: Header Auth `X-Goog-Api-Key`. Enable *Places API (New)* in Google Cloud (generous free monthly credit covers thousands of searches). Returns name, category, website, phone, address, rating, review count, Maps URL. **Emails are NOT provided by Google** \u2014 the Website Checker extracts any email it finds on the site instead.\n\n**Alternative sources (disabled placeholders below):**\n- **SerpAPI** \u2014 HTTP GET `https://serpapi.com/search?engine=google_maps&q=...&api_key=...`\n- **Apify / Outscraper** \u2014 run their Google Maps scraper actors, fetch results via HTTP; higher volume, paid\n- **Manual CSV** \u2014 replace the Places node with a *Read/Write Files* or *Extract From File* node; map columns to: business_name, category, website_url, phone, address, rating, reviews\n\nWhichever source you use, feed it into `Prepare & Normalise Leads` in the same field format and everything downstream just works.",
+        "height": 540,
+        "width": 420,
+        "color": 6
+      },
+      "id": "note-sources",
+      "name": "Note - Lead Sources",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -600,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83c\udf10 WEBSITE CHECKER + SCORING (out of 100)\n\nEach lead's site is checked for: loads OK, contact page, service pages, target city mentioned, FAQ/pricing content, schema markup, blog/content, third-party directory badges (Checkatrade, Trustpilot, Yell, Rated People, TrustATrader, Which?, Facebook/Instagram), plus an email harvest.\n\n**Scoring:**\n- Has website **+20**\n- Website loads **+10**\n- Service pages found **+10**\n- Location/city mentioned **+10**\n- FAQ/pricing content **+10**\n- Schema markup **+10**\n- Strong reviews (\u2265 your minimums) **+15**\n- Third-party directory presence **+15**\n- SEO/Ads/marketing signals **+20**\n(capped at 100)\n\n## \ud83d\udcb0 MARKETING SIGNALS = HIGH INTENT\nAlso detected: Google Tag Manager, Google Analytics, Meta Pixel, Yoast/RankMath, WordPress, UTM links, landing pages, agency footer credits, call tracking.\n\n**Any found \u2192 the business already spends money online \u2192 HIGH INTENT.** Your best prospects: they understand marketing, have budget, and are used to paying monthly.",
+        "height": 700,
+        "width": 420,
+        "color": 5
+      },
+      "id": "note-checker",
+      "name": "Note - Website Checker",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83e\udde0 AI LEAD ANALYST + \u270d\ufe0f OUTREACH GENERATOR\n\nClaude reviews each lead and returns: summary, **main weakness**, suggested service, priority + reason \u2014 AND, for Hot/Warm leads only, a full outreach pack:\n- Cold email (max 120 words)\n- LinkedIn message\n- Phone call script\n- Follow-up after 3 days\n- Follow-up after 7 days\n\nAll saved to the sheet as **DRAFTS for manual review \u2014 never sent automatically.**\n\n**Honesty rules baked into the prompt** \u2014 the AI is forbidden from writing: 'guaranteed #1 in ChatGPT', 'AI will always recommend you', 'we control ChatGPT', 'secret ranking trick'. It uses honest framings instead: improve AI visibility, track before/after mentions, strengthen the signals AI tools rely on, make your website easier for AI to understand, show monthly evidence.\n\n**Classification:** Hot (website + strong reviews + marketing spend + clear weaknesses), Warm (website + decent presence + some weaknesses), Low Priority (weak presence), Not Suitable (no website / bad data / irrelevant).\n\n\ud83d\udd8a Edit the prompt inside `AI Lead Analyst` to change judging or writing style. AI errors never break the run \u2014 the lead saves as Low Priority with a note.",
+        "height": 720,
+        "width": 420,
+        "color": 7
+      },
+      "id": "note-ai",
+      "name": "Note - AI Analyst",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        820,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udcca SHEET (CRM) + DUPLICATES + ERRORS\n\n**Create a Google Sheet with these exact headers (row 1):**\n`Date Found | Business Name | Business Type | Location | Website URL | Phone Number | Email | Address | Google Rating | Number of Reviews | Website Status | Contact Page Found | Service Page Found | SEO Signals Found | Marketing Signals Found | Lead Quality Score | Lead Priority | Main Weakness | Suggested Service | Suggested Outreach Message | LinkedIn Message | Phone Script | Follow Up Day 3 | Follow Up Day 7 | Source | Status | Notes`\n\nDefault **Status = \"Not Contacted\"** (TEST in testing mode, ERROR for problem rows).\n\n**Duplicate check:** existing rows are read first; any lead whose *Business Name + Website URL* already exists is **skipped** (count in the summary). To *update* instead: change the Save node to **Append or Update** matching on Business Name.\n\n**Errors never stop a run** \u2014 API/website/AI/Sheets problems go into the Notes column or the summary. 'No leads found' writes one ERROR row.\n\n**Excel/OneDrive instead:** swap the two Google Sheets nodes for Microsoft Excel 365 nodes, same field names.",
+        "height": 720,
+        "width": 440,
+        "color": 3
+      },
+      "id": "note-sheet",
+      "name": "Note - Sheet, Duplicates, Errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udcec RUN SUMMARY + \ud83e\uddea TESTING MODE\n\nAfter every run you get a summary by **Email (Gmail)** and **Telegram** (both optional \u2014 if a credential is missing the run still completes):\n- Leads found / saved / skipped as duplicates\n- Hot and Warm lead counts\n- Top 5 leads by score\n- Link to the sheet\n\nDestinations are set in `EDIT THIS SECTION FIRST` (notify_email, telegram_chat_id \u2014 message @userinfobot on Telegram to get yours).\n\n**TESTING MODE (config flag):**\n- ON \u2192 only 3 leads processed, rows marked TEST, dummy sample businesses used if the Places API isn't connected yet, summary prefixed [TEST]\n- OFF \u2192 full live run\n\n**Safe first test:** TESTING_MODE true \u2192 Execute workflow \u2192 check 3 TEST rows appear in your sheet and the summary arrives \u2192 then connect the real Places key \u2192 run again \u2192 only then set TESTING_MODE false.",
+        "height": 560,
+        "width": 420,
+        "color": 4
+      },
+      "id": "note-summary",
+      "name": "Note - Summary and Testing",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        40
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "manual-01",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        560
+      ],
+      "notes": "Click 'Execute workflow' to run on demand."
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "schedule-02",
+      "name": "Schedule Trigger (Weekly - DISABLED)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1440,
+        760
+      ],
+      "notes": "Weekly, Mondays 08:00. Disabled by default \u2014 right-click \u2192 Enable when you're ready for automatic runs.",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// \u2b50 EDIT THIS SECTION FIRST \u2b50\n// Change the business type, location and limits here.\n// This is normally the ONLY node you need to edit.\n// ============================================================\nconst CONFIG = {\n\n  // ---- WHAT TO SEARCH FOR --------------------------------------------\n  target_location: \"Birmingham\",\n  target_country: \"United Kingdom\",\n  business_category: \"electricians\",   // e.g. dentists, beauty salons, car garages, estate agents, accountants, private clinics, restaurants\n  max_leads: 15,                        // per run (Google returns max 20 per search)\n\n  // ---- LEAD QUALITY RULES ----------------------------------------------\n  min_rating: 4.0,\n  min_reviews: 10,\n  must_have_website: \"yes\",            // 'yes' = skip no-website businesses (recommended). 'no' = keep them, scored low.\n  prioritise_reviews: \"yes\",\n  prioritise_marketing_signals: \"yes\",\n\n  // ---- YOUR LEADS SHEET (CRM destination: Google Sheets) -----------------\n  google_sheet_id: \"REPLACE_WITH_GOOGLE_SHEET_ID\",\n  google_sheet_url: \"https://docs.google.com/spreadsheets/d/REPLACE_WITH_GOOGLE_SHEET_ID\",\n  sheet_name: \"Leads\",\n\n  // ---- MODES ----------------------------------------------------------------\n  // TESTING_MODE: true = 3 leads only, rows marked TEST, dummy data if\n  //   APIs missing, outreach drafts only, NEVER auto-audits.\n  // REVIEW_MODE:  true (default) = find, score, save, draft outreach,\n  //   then WAIT for you to review the sheet manually.\n  // AUTO_AUDIT_HOT_LEADS: false (default). Set true to automatically run\n  //   the full AI Visibility Audit on the TOP Hot Lead of each live run\n  //   (one per run, to control API cost). Ignored while TESTING_MODE is true.\n  TESTING_MODE: true,\n  REVIEW_MODE: true,\n  AUTO_AUDIT_HOT_LEADS: false,\n\n  // ---- YOUR COMPANY (used by the AI for outreach drafts) -------------------\n  company_name: \"Baron AI Solutions LTD\",\n  company_website: \"https://www.baronaisolutions.example.co.uk\",\n  company_email: \"hello@baronaisolutions.example.co.uk\",\n  services_offered: \"AI-built websites, AI receptionist and missed-call automation, business workflow automation, SEO, and GEO/AI-visibility (improving how often AI tools like ChatGPT mention and recommend a business)\",\n  outreach_tone: \"friendly, professional, straight to the point, no hard sell, UK English, prices in GBP\",\n\n  // ---- RUN SUMMARY DESTINATIONS ---------------------------------------------\n  notify_email: \"you@baronaisolutions.example.co.uk\",   // also receives auto-audit reports\n  telegram_chat_id: \"REPLACE_WITH_YOUR_CHAT_ID\"          // message @userinfobot on Telegram to get it\n};\n\nreturn [{ json: { config: CONFIG } }];"
+      },
+      "id": "config-03",
+      "name": "EDIT THIS SECTION FIRST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1000,
+        660
+      ],
+      "notes": "\u2b50 Change business type / location / limits here. Usually the only node to edit."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://places.googleapis.com/v1/places:searchText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Goog-FieldMask",
+              "value": "places.displayName,places.formattedAddress,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.googleMapsUri,places.primaryTypeDisplayName"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"textQuery\": {{ JSON.stringify($json.config.business_category + ' in ' + $json.config.target_location + ', ' + $json.config.target_country) }}, \"maxResultCount\": {{ Math.min(20, $json.config.TESTING_MODE ? 3 : $json.config.max_leads) }}, \"regionCode\": \"GB\" }",
+        "options": {}
+      },
+      "id": "places-04",
+      "name": "Search Google Places (Text Search)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -760,
+        660
+      ],
+      "notes": "CREDENTIAL NEEDED: Header Auth \u2192 Name: X-Goog-Api-Key, Value: your Google key (enable 'Places API (New)' in Google Cloud). If it errors or you have no key yet, testing mode falls back to dummy data.",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Google Places API Key"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "ph-serp-05",
+      "name": "PLACEHOLDER - SerpAPI source",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        880
+      ],
+      "notes": "Disabled placeholder. To use SerpAPI instead: replace the Places node with an HTTP GET to https://serpapi.com/search?engine=google_maps&q={category in location}&api_key=YOUR_KEY, then map results to the same fields in Prepare & Normalise Leads.",
+      "disabled": true
+    },
+    {
+      "parameters": {},
+      "id": "ph-apify-06",
+      "name": "PLACEHOLDER - Apify / Outscraper source",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        1020
+      ],
+      "notes": "Disabled placeholder. Apify/Outscraper Google Maps scrapers give higher volume (paid). Run their actor via HTTP, fetch the dataset, map to the same fields in Prepare & Normalise Leads.",
+      "disabled": true
+    },
+    {
+      "parameters": {},
+      "id": "ph-csv-07",
+      "name": "PLACEHOLDER - Manual CSV upload",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        1160
+      ],
+      "notes": "Disabled placeholder. To use your own CSV: add an 'Extract From File' node reading columns business_name, category, website_url, phone, address, rating, reviews, and feed it into Prepare & Normalise Leads instead of the Places node.",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('EDIT THIS SECTION FIRST').first().json.config.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('EDIT THIS SECTION FIRST').first().json.config.sheet_name }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "read-08",
+      "name": "Read Existing Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -520,
+        660
+      ],
+      "notes": "CREDENTIAL NEEDED: Google Sheets OAuth2. Reads current rows for the duplicate check. If the sheet is empty or unreachable, the run continues (nothing to dedupe against).",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// PREPARE & NORMALISE LEADS (+ duplicate check + testing mode\n// + 'no leads found' error handling + dummy test data)\n// Converts Google Places results into standard lead objects,\n// skips duplicates already in your sheet, applies the\n// must_have_website rule, and caps the batch size.\n// No changes needed.\n// ============================================================\nconst cfg = $('EDIT THIS SECTION FIRST').first().json.config;\n\n// --- existing rows (for duplicate check) ---\nconst existingRows = $input.all().map(i => i.json).filter(r => r && (r['Business Name'] || r['Website URL']));\nconst existingKeys = new Set(existingRows.map(r => (String(r['Business Name'] || '') + '|' + String(r['Website URL'] || '')).toLowerCase().trim()));\n\n// --- places results (may have failed) ---\nlet places = [];\ntry {\n  const p = $('Search Google Places (Text Search)').first().json || {};\n  if (Array.isArray(p.places)) places = p.places;\n} catch (e) { places = []; }\n\nlet leads = places.map(p => ({\n  business_name: (p.displayName && p.displayName.text) || 'Unknown',\n  category: (p.primaryTypeDisplayName && p.primaryTypeDisplayName.text) || cfg.business_category,\n  website_url: p.websiteUri || '',\n  phone: p.nationalPhoneNumber || '',\n  email: '',\n  address: p.formattedAddress || '',\n  city: cfg.target_location,\n  country: cfg.target_country,\n  rating: p.rating || 0,\n  reviews: p.userRatingCount || 0,\n  gbp_url: p.googleMapsUri || '',\n  source: 'google_places'\n}));\n\n// --- TESTING MODE: dummy data if API not connected / returned nothing ---\nif (leads.length === 0 && cfg.TESTING_MODE) {\n  leads = [\n    { business_name: 'Spark Bright Electrical (TEST)', category: 'Electrician', website_url: 'https://www.example.com', phone: '+44 121 000 1111', email: '', address: '1 Test Street, Birmingham', city: cfg.target_location, country: cfg.target_country, rating: 4.7, reviews: 86, gbp_url: '', source: 'dummy-test-data' },\n    { business_name: 'Bella Glow Salon (TEST)', category: 'Beauty salon', website_url: 'https://www.example.com', phone: '+44 121 000 2222', email: '', address: '2 Test Road, Birmingham', city: cfg.target_location, country: cfg.target_country, rating: 4.9, reviews: 214, gbp_url: '', source: 'dummy-test-data' },\n    { business_name: 'Kings Heath Motors (TEST)', category: 'Car garage', website_url: '', phone: '+44 121 000 3333', email: '', address: '3 Test Lane, Birmingham', city: cfg.target_location, country: cfg.target_country, rating: 4.2, reviews: 31, gbp_url: '', source: 'dummy-test-data' }\n  ];\n}\n\n// --- ERROR PATH: no leads found at all ---\nif (leads.length === 0) {\n  const sd = $getWorkflowStaticData('global');\n  sd.leadRunStats = { found: 0, duplicates_skipped: 0, no_website_skipped: 0 };\n  return [{ json: {\n    __error_row: true,\n    business_name: '(no leads found this run)',\n    category: cfg.business_category, website_url: '', phone: '', email: '', address: '',\n    city: cfg.target_location, country: cfg.target_country, rating: 0, reviews: 0, gbp_url: '',\n    source: 'google_places',\n    error_note: 'No leads returned for query: ' + cfg.business_category + ' in ' + cfg.target_location + '. Check the Places API key/quota or broaden the category.'\n  } }];\n}\n\nconst found = leads.length;\n\n// --- duplicate check (Business Name + Website URL) ---\nconst fresh = [];\nlet duplicates = 0;\nfor (const l of leads) {\n  const key = (l.business_name + '|' + l.website_url).toLowerCase().trim();\n  if (existingKeys.has(key)) { duplicates++; continue; }\n  existingKeys.add(key);\n  fresh.push(l);\n}\n\n// --- must_have_website rule ---\nlet noSite = 0;\nlet kept = fresh;\nif (cfg.must_have_website === 'yes') {\n  kept = fresh.filter(l => { const ok = (l.website_url || '').length > 4; if (!ok) noSite++; return ok; });\n}\n\n// --- sort: reviews desc (if prioritise_reviews), then rating desc ---\nkept.sort((a, b) => {\n  if (cfg.prioritise_reviews === 'yes' && b.reviews !== a.reviews) return b.reviews - a.reviews;\n  return b.rating - a.rating;\n});\n\n// --- cap batch ---\nconst cap = cfg.TESTING_MODE ? 3 : cfg.max_leads;\nkept = kept.slice(0, cap);\n\n// --- stats for the run summary ---\nconst sd = $getWorkflowStaticData('global');\nsd.leadRunStats = { found, duplicates_skipped: duplicates, no_website_skipped: noSite };\n\nreturn kept.map(l => ({ json: l }));"
+      },
+      "id": "prepare-09",
+      "name": "Prepare & Normalise Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        660
+      ],
+      "notes": "Standardises leads, skips duplicates (name+website), applies must_have_website, caps the batch, injects dummy data in testing mode. No changes needed."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-site",
+              "leftValue": "={{ ($json.website_url || '').length > 4 ? 'yes' : 'no' }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-site-10",
+      "name": "Has Website?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -40,
+        660
+      ],
+      "notes": "TRUE \u2192 fetch and analyse the website. FALSE \u2192 scored without one (low)."
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.website_url }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "fetch-11",
+      "name": "Fetch Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        540
+      ],
+      "notes": "No credential needed. Downloads the homepage HTML (10s timeout). If a site is down/blocked, the lead is kept and marked 'failed-to-load' \u2014 error handling built in.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// ANALYSE WEBSITE & SCORE (0-100) + SEO/MARKETING SIGNALS\n// Checks: loads, contact page, service pages, city mentioned,\n// FAQ/pricing, schema, blog/content, directory presence,\n// SEO + marketing spend signals, outdated signs, email harvest.\n//\n// SCORING (capped at 100):\n//   Has website +20 | Loads +10 | Service pages +10\n//   City/location mentioned +10 | FAQ/pricing +10 | Schema +10\n//   Strong reviews +15 | Third-party directory presence +15\n//   SEO/Ads/marketing signals +20\n// No changes needed.\n// ============================================================\nconst lead = $('Has Website?').item.json;\nconst cfg = $('EDIT THIS SECTION FIRST').first().json.config;\nconst resp = $json || {};\n\nconst failed = !!resp.error;\nconst raw = failed ? '' : String(resp.data || resp.body || '').slice(0, 400000);\nconst html = raw.toLowerCase();\nconst loads = !failed && html.length > 200;\n\nconst has = s => html.includes(s);\n\n// --- page structure checks ---\nconst contact_page = has('contact') || has('get in touch');\nconst service_page = has('services') || has('our work') || has('what we do') || has('treatments') || has('repairs');\nconst mentions_city = html.includes(cfg.target_location.toLowerCase());\nconst has_form = has('<form') || has('calendly') || has('book online') || has('book now') || has('booking');\nconst pricing_faq = has('pricing') || has('prices') || has('faq') || has('frequently asked');\nconst has_schema = has('application/ld+json') || has('itemtype=');\nconst has_blog = has('/blog') || has('>blog<') || has('latest news') || has('articles');\n\n// --- third-party directory presence (badges/links on the site) ---\nconst dirs = [];\nif (has('checkatrade')) dirs.push('Checkatrade');\nif (has('trustpilot')) dirs.push('Trustpilot');\nif (has('yell.com')) dirs.push('Yell');\nif (has('ratedpeople')) dirs.push('Rated People');\nif (has('trustatrader')) dirs.push('TrustATrader');\nif (has('trusted traders') || has('trustedtraders')) dirs.push('Which? Trusted Traders');\nif (has('facebook.com/')) dirs.push('Facebook page');\nif (has('instagram.com/')) dirs.push('Instagram');\nconst directory_presence = dirs.length > 0;\n\n// --- outdated signs ---\nconst noViewport = loads && !has('viewport');\nconst oldCopyright = /(\u00a9|&copy;|copyright)\\s*(20(0\\d|1\\d|20|21|22))\\b/.test(html);\nconst looks_outdated = loads && (noViewport || oldCopyright);\n\n// --- SEO signals ---\nconst seo = [];\nif (has('meta name=\"description\"') || has(\"meta name='description'\")) seo.push('meta description');\nif (has('og:title') || has('og:description')) seo.push('open graph tags');\nif (has_schema) seo.push('schema markup');\nif (has('sitemap')) seo.push('sitemap link');\nif (has_blog) seo.push('active blog/content');\n\n// --- marketing / spend signals (HIGH INTENT) ---\nconst mkt = [];\nif (has('googletagmanager') || has('gtm.js')) mkt.push('Google Tag Manager');\nif (has('google-analytics') || has('gtag(')) mkt.push('Google Analytics');\nif (has('connect.facebook.net') || has('fbq(')) mkt.push('Meta Pixel');\nif (has('yoast')) mkt.push('Yoast SEO');\nif (has('rank-math') || has('rankmath')) mkt.push('RankMath SEO');\nif (has('wp-content')) mkt.push('WordPress site');\nif (has('utm_')) mkt.push('UTM tracked links');\nif (has('website by') || has('designed by') || has('built by')) mkt.push('agency footer credit');\nif (has('calltracking') || has('call tracking') || has('ctm.js') || has('infinity.co')) mkt.push('call tracking');\nif ((html.match(/\\/(landing|lp)[\\/-]/g) || []).length > 0) mkt.push('landing pages');\n\nconst high_intent = mkt.length > 0;\n\n// --- harvest an email from the site ---\nlet email = lead.email || '';\nconst m = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/);\nif (!email && m && !m[0].includes('example.') && !m[0].endsWith('.png') && !m[0].endsWith('.jpg')) email = m[0];\n\n// --- SCORE (out of 100, capped) ---\nconst strong_reviews = (lead.reviews >= cfg.min_reviews) && (lead.rating >= cfg.min_rating);\nlet score = 0;\nscore += 20;                                     // has website\nif (loads) score += 10;                          // loads\nif (service_page) score += 10;                   // service pages\nif (mentions_city) score += 10;                  // location/city mentioned\nif (pricing_faq) score += 10;                    // FAQ/pricing content\nif (has_schema) score += 10;                     // schema markup\nif (strong_reviews) score += 15;                 // strong reviews\nif (directory_presence) score += 15;             // third-party directory presence\nif (seo.length > 0 || mkt.length > 0) score += 20; // SEO/Ads/marketing signals\nif (score > 100) score = 100;\n\nreturn { json: {\n  ...lead,\n  email,\n  website_status: loads ? 'loads' : 'failed-to-load',\n  contact_page_found: contact_page ? 'yes' : 'no',\n  service_page_found: service_page ? 'yes' : 'no',\n  mentions_city: mentions_city ? 'yes' : 'no',\n  has_booking_form: has_form ? 'yes' : 'no',\n  pricing_or_faq: pricing_faq ? 'yes' : 'no',\n  has_schema: has_schema ? 'yes' : 'no',\n  has_blog: has_blog ? 'yes' : 'no',\n  directory_presence: dirs.join(', ') || 'none',\n  looks_outdated: looks_outdated ? 'yes' : 'no',\n  seo_signals: seo.join(', ') || 'none',\n  marketing_signals: mkt.join(', ') || 'none',\n  high_intent: high_intent ? 'HIGH INTENT' : 'normal',\n  lead_score: score,\n  fetch_error: failed ? 'website could not be fetched' : ''\n} };"
+      },
+      "id": "analyse-12",
+      "name": "Analyse Website & Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        540
+      ],
+      "notes": "All website checks + the 0\u2013100 score + marketing-signal (HIGH INTENT) detection. No changes needed."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Scores leads WITHOUT a website (and carries the special\n// 'no leads found' error row through). Max score here is 15\n// (strong reviews only) - Low Priority / Not Suitable by design.\n// No changes needed.\nconst lead = $json;\nconst cfg = $('EDIT THIS SECTION FIRST').first().json.config;\n\nconst blank = { website_status: 'no-website', contact_page_found: 'no', service_page_found: 'no', mentions_city: 'no', has_booking_form: 'no', pricing_or_faq: 'no', has_schema: 'no', has_blog: 'no', directory_presence: 'none', looks_outdated: 'no', seo_signals: 'none', marketing_signals: 'none', high_intent: 'normal' };\n\nif (lead.__error_row) {\n  return { json: { ...lead, ...blank, website_status: 'n/a', lead_score: 0, fetch_error: lead.error_note } };\n}\n\nlet score = 0;\nif (lead.reviews >= cfg.min_reviews && lead.rating >= cfg.min_rating) score += 15;\n\nreturn { json: { ...lead, ...blank, lead_score: score, fetch_error: '' } };"
+      },
+      "id": "nosite-13",
+      "name": "Score Lead (No Website)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        800
+      ],
+      "notes": "No-website leads are scored low (max 35). No changes needed."
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "merge-14",
+      "name": "Merge Website Checks",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        680,
+        660
+      ],
+      "notes": "Joins both branches back together. No changes needed."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 1800, \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify('You are a lead-qualification analyst and outreach copywriter for ' + $('EDIT THIS SECTION FIRST').first().json.config.company_name + ', a UK agency selling: ' + $('EDIT THIS SECTION FIRST').first().json.config.services_offered + '. Write in UK English. Prices in GBP. Tone: ' + $('EDIT THIS SECTION FIRST').first().json.config.outreach_tone + '.\\n\\nAnalyse this business lead (data gathered from Google and their website):\\n' + JSON.stringify($json) + '\\n\\nCLASSIFICATION RULES:\\n- Hot Lead: has a website AND strong reviews AND signs of marketing activity/spend AND clear website weaknesses - likely to pay for a monthly service.\\n- Warm Lead: has a website and a decent online presence, with some weaknesses found.\\n- Low Priority: weak online presence, few reviews, no marketing signals.\\n- Not Suitable: no website, or bad/missing data, or not relevant to the agency services.\\n\\nOUTREACH (only if Hot Lead or Warm Lead - otherwise return empty strings): write 5 pieces, each referencing ONE specific observed weakness or opportunity from the data. These are DRAFTS saved for a human to review and send manually - never sent automatically.\\n1. cold_email: max 120 words, soft question at the end.\\n2. linkedin_message: max 60 words, casual, no links.\\n3. phone_script: 4-6 short lines the caller can say naturally, including one question.\\n4. followup_3d: max 60 words, references the first email lightly, adds one new specific point.\\n5. followup_7d: max 50 words, polite final nudge, easy opt-out line.\\n\\nHONESTY RULES - never write anything resembling: guaranteed number 1 in ChatGPT; AI will always recommend you; we control ChatGPT or any AI; secret ranking trick; guaranteed results. Instead use honest framings like: improve your AI visibility; track before/after mentions; strengthen the signals AI tools rely on; make your website easier for AI tools to understand; we show monthly evidence of progress.\\n\\nReturn ONLY valid JSON, no markdown fences: {\"lead_summary\": \"2 short sentences\", \"main_weakness\": \"the single biggest weakness or opportunity found\", \"suggested_service\": \"one specific service to pitch\", \"lead_priority\": \"Hot Lead\" or \"Warm Lead\" or \"Low Priority\" or \"Not Suitable\", \"priority_reason\": \"one sentence why\", \"cold_email\": \"...\", \"linkedin_message\": \"...\", \"phone_script\": \"...\", \"followup_3d\": \"...\", \"followup_7d\": \"...\"}') }}}] }",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1500
+            }
+          }
+        }
+      },
+      "id": "ai-15",
+      "name": "AI Lead Analyst",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        660
+      ],
+      "notes": "CREDENTIAL NEEDED: Header Auth (x-api-key = Anthropic key). This node classifies leads AND drafts the outreach pack (cold email, LinkedIn, phone script, 3-day and 7-day follow-ups) for Hot/Warm leads only. Honesty rules are baked into the prompt - no guaranteed-ranking claims. Edit the prompt here to change judging rules or outreach style.",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Anthropic API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// PARSE AI VERDICT (+ AI error handling)\n// If the AI errors or returns broken JSON, the lead is still\n// saved as 'Low Priority' with a note - the run never breaks.\n// No changes needed.\n// ============================================================\nlet lead = {};\ntry { lead = $('Merge Website Checks').item.json; } catch (e) { lead = {}; }\n\nconst resp = $json || {};\nlet text = '';\nif (Array.isArray(resp.content)) text = resp.content.filter(b => b.type === 'text').map(b => b.text).join('\\n');\ntext = text.replace(/```json/gi, '').replace(/```/g, '').trim();\n\nlet a = null;\ntry { a = JSON.parse(text); } catch (e) { a = null; }\n\nif (!a || !a.lead_priority) {\n  a = {\n    lead_summary: 'AI analysis unavailable for this lead.',\n    main_weakness: 'unknown (AI error)',\n    suggested_service: 'review manually',\n    lead_priority: lead.__error_row ? 'Not Suitable' : 'Low Priority',\n    priority_reason: 'AI node error - classified conservatively',\n    cold_email: '', linkedin_message: '', phone_script: '', followup_3d: '', followup_7d: ''\n  };\n}\n\nreturn { json: { ...lead, ...a } };"
+      },
+      "id": "parse-16",
+      "name": "Parse AI Verdict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        660
+      ],
+      "notes": "AI error \u2192 lead still saved as Low Priority with a note. No changes needed."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// PREPARE SHEET ROW\n// Maps everything to the exact sheet column headers.\n// Field names here MUST match your sheet's row-1 headers.\n// ============================================================\nconst j = $json;\nconst cfg = $('EDIT THIS SECTION FIRST').first().json.config;\n\nconst notes = [];\nif (j.fetch_error) notes.push(j.fetch_error);\nif (j.looks_outdated === 'yes') notes.push('website looks outdated');\nif (j.directory_presence && j.directory_presence !== 'none') notes.push('directories: ' + j.directory_presence);\nif (j.high_intent === 'HIGH INTENT') notes.push('HIGH INTENT: already spending on marketing');\nif (j.priority_reason) notes.push(j.priority_reason);\nif (j.__error_row) notes.push('ERROR ROW - see fetch_error');\n\nreturn { json: {\n  'Date Found': new Date().toISOString().slice(0, 10),\n  'Business Name': j.business_name || '',\n  'Business Type': j.category || '',\n  'Location': (j.city || '') + (j.country ? ', ' + j.country : ''),\n  'Website URL': j.website_url || '',\n  'Phone Number': j.phone || '',\n  'Email': j.email || '',\n  'Address': j.address || '',\n  'Google Rating': j.rating || 0,\n  'Number of Reviews': j.reviews || 0,\n  'Website Status': j.website_status || '',\n  'Contact Page Found': j.contact_page_found || 'no',\n  'Service Page Found': j.service_page_found || 'no',\n  'SEO Signals Found': j.seo_signals || 'none',\n  'Marketing Signals Found': j.marketing_signals || 'none',\n  'Lead Quality Score': j.lead_score || 0,\n  'Lead Priority': j.lead_priority || 'Low Priority',\n  'Main Weakness': j.main_weakness || '',\n  'Suggested Service': j.suggested_service || '',\n  'Suggested Outreach Message': j.cold_email || '',\n  'LinkedIn Message': j.linkedin_message || '',\n  'Phone Script': j.phone_script || '',\n  'Follow Up Day 3': j.followup_3d || '',\n  'Follow Up Day 7': j.followup_7d || '',\n  'Source': j.source || '',\n  'Status': j.__error_row ? 'ERROR' : (cfg.TESTING_MODE ? 'TEST' : 'Not Contacted'),\n  'Notes': notes.join(' | ')\n} };"
+      },
+      "id": "row-17",
+      "name": "Prepare Sheet Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        660
+      ],
+      "notes": "Maps data to the exact sheet headers. Only edit if you add/remove columns."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('EDIT THIS SECTION FIRST').first().json.config.google_sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('EDIT THIS SECTION FIRST').first().json.config.sheet_name }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "save-18",
+      "name": "Save Leads To Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1640,
+        660
+      ],
+      "notes": "CREDENTIAL NEEDED: same Google Sheets OAuth2. Appends new leads (duplicates were already skipped). To UPDATE duplicates instead: change operation to 'Append or Update' with 'Business Name' as the matching column. Sheet ID/name come from the config node.",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// BUILD RUN SUMMARY\n// Counts results, lists the top 5 leads by score, and prepares\n// the message sent by email + Telegram. No changes needed.\n// ============================================================\nconst cfg = $('EDIT THIS SECTION FIRST').first().json.config;\nconst rows = $('Prepare Sheet Row').all().map(i => i.json).filter(r => !String(r['Notes'] || '').includes('ERROR ROW'));\n\nconst sd = $getWorkflowStaticData('global');\nconst stats = sd.leadRunStats || { found: rows.length, duplicates_skipped: 0, no_website_skipped: 0 };\n\nconst sheetsResult = $input.first().json || {};\nconst sheetsFailed = !!sheetsResult.error;\n\nconst hot = rows.filter(r => r['Lead Priority'] === 'Hot Lead').length;\nconst warm = rows.filter(r => r['Lead Priority'] === 'Warm Lead').length;\n\nconst top5 = [...rows].sort((a, b) => (b['Lead Quality Score'] || 0) - (a['Lead Quality Score'] || 0)).slice(0, 5)\n  .map((r, i) => (i + 1) + '. ' + r['Business Name'] + ' - ' + r['Lead Quality Score'] + '/100, ' + r['Lead Priority'] + (r['Marketing Signals Found'] !== 'none' ? ' (HIGH INTENT)' : ''))\n  .join('\\n');\n\nconst autoAudit = (cfg.AUTO_AUDIT_HOT_LEADS && !cfg.TESTING_MODE && hot > 0)\n  ? '\\n\ud83e\udd16 Auto-audit: the top Hot Lead is being run through the full AI Visibility Audit - report to ' + cfg.notify_email\n  : '\\nNext step: review the sheet, pick your best leads, and run the AI Visibility Audit on them via the audit form.';\n\nconst prefix = cfg.TESTING_MODE ? '[TEST] ' : '';\nconst summary_text =\n  prefix + '\ud83d\udccb Baron AI Lead Finder - run complete\\n' +\n  'Search: ' + cfg.business_category + ' in ' + cfg.target_location + '\\n\\n' +\n  'Leads found: ' + stats.found + '\\n' +\n  'Saved to sheet: ' + (sheetsFailed ? '0 (SHEET ERROR - check credentials/ID)' : rows.length) + '\\n' +\n  'Skipped as duplicates: ' + stats.duplicates_skipped + '\\n' +\n  'Skipped (no website): ' + stats.no_website_skipped + '\\n' +\n  '\ud83d\udd25 Hot leads: ' + hot + '\\n' +\n  '\ud83c\udf24 Warm leads: ' + warm + '\\n\\n' +\n  'Top 5 leads:\\n' + (top5 || '(none this run)') + '\\n\\n' +\n  'Sheet: ' + cfg.google_sheet_url + autoAudit + '\\n\\n' +\n  'Reminder: outreach messages are DRAFTS in the sheet - review and send manually.';\n\nreturn [{ json: { summary_text, subject: prefix + 'Lead Finder: ' + rows.length + ' leads (' + hot + ' hot) - ' + cfg.business_category + ' in ' + cfg.target_location, to: cfg.notify_email, telegram_chat_id: cfg.telegram_chat_id } }];"
+      },
+      "id": "summary-19",
+      "name": "Build Run Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1880,
+        660
+      ],
+      "notes": "Builds the run report. No changes needed \u2014 destinations come from the config."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.summary_text }}",
+        "options": {}
+      },
+      "id": "gmail-20",
+      "name": "Email Run Summary",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2120,
+        660
+      ],
+      "notes": "CREDENTIAL NEEDED: Gmail OAuth2. Sends the summary to notify_email from the config. If it fails, the Telegram summary still goes out.",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Build Run Summary').item.json.telegram_chat_id }}",
+        "text": "={{ $('Build Run Summary').item.json.summary_text }}",
+        "additionalFields": {}
+      },
+      "id": "tg-21",
+      "name": "Telegram Run Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2360,
+        660
+      ],
+      "notes": "CREDENTIAL NEEDED: Telegram Bot (optional). Sends the same summary to telegram_chat_id from the config. Message @userinfobot to find your chat ID.",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## \ud83c\udf09 LEAD \u2192 AUDIT BRIDGE\n\n**Default (manual, recommended):** work the leads sheet, pick a Hot Lead, open the **Audit Request Form** URL (from the form node below) and submit that business. The full 3-engine Visibility Audit runs and the report lands in your inbox \u2014 your screenshot-backed sales pitch.\n\n**Optional (automatic):** set `AUTO_AUDIT_HOT_LEADS: true` in the config. Each LIVE run then pushes its single TOP Hot Lead into the audit automatically (one per run to control API cost, ~\u00a31\u2013\u00a32.50 each). Never fires in TESTING_MODE.\n\nThe `Audit Input` node makes both entry paths identical, so the audit section below runs completely unchanged.",
+        "height": 440,
+        "width": 420,
+        "color": 6
+      },
+      "id": "note-bridge",
+      "name": "Note - Lead to Audit Bridge",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2620,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-autoaudit",
+              "leftValue": "={{ ($('EDIT THIS SECTION FIRST').first().json.config.AUTO_AUDIT_HOT_LEADS && !$('EDIT THIS SECTION FIRST').first().json.config.TESTING_MODE) ? 'yes' : 'no' }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-autoaudit-30",
+      "name": "Auto-Audit Enabled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1880,
+        920
+      ],
+      "notes": "TRUE only when AUTO_AUDIT_HOT_LEADS is true AND testing mode is off. Otherwise the run ends after the summary and you review the sheet manually (default)."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// PICK TOP HOT LEAD (auto-audit mode only)\n// Takes the single highest-scoring Hot Lead from this run and\n// shapes it like an Audit Request Form submission. One lead\n// per run keeps audit API costs predictable (~\u00a31-\u00a32.50 each).\n// If there are no Hot Leads, nothing happens.\n// No changes needed.\n// ============================================================\nconst cfg = $('EDIT THIS SECTION FIRST').first().json.config;\nconst leads = $('Parse AI Verdict').all().map(i => i.json)\n  .filter(l => l.lead_priority === 'Hot Lead' && !l.__error_row);\nif (leads.length === 0) return [];\nleads.sort((a, b) => (b.lead_score || 0) - (a.lead_score || 0));\nconst top = leads[0];\nreturn [{ json: {\n  'Business Name': top.business_name,\n  'Town / City': cfg.target_location,\n  'County / Wider Area': '',\n  'Services (comma separated)': top.category || cfg.business_category,\n  'Known Competitors (comma separated)': '',\n  'Report Recipient Email': cfg.notify_email\n} }];"
+      },
+      "id": "pick-top-31",
+      "name": "Pick Top Hot Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2120,
+        920
+      ],
+      "notes": "Feeds the run's best Hot Lead into the audit (auto mode only). No changes needed."
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udfe2 READ ME FIRST \u2014 Setup Checklist\n\nDo these 5 things after importing, in order:\n\n**1. Create 4 credentials** (Settings \u2192 Credentials):\n- `Anthropic API Key` \u2192 type **Header Auth** \u2192 Name: `x-api-key` \u2192 Value: your key from console.anthropic.com\n- `Perplexity API Key` \u2192 type **Header Auth** \u2192 Name: `Authorization` \u2192 Value: `Bearer pplx-xxxx` (key from perplexity.ai/settings/api)\n- `OpenAI API Key` \u2192 type **Header Auth** \u2192 Name: `Authorization` \u2192 Value: `Bearer sk-xxxx` (key from platform.openai.com)\n- `Gmail account` \u2192 type **Gmail OAuth2**\n\n**2. Re-select credentials** in these 6 nodes (they show a red \u26a0 after import): Ask Claude, Ask Perplexity, Ask ChatGPT, Analyse Mentions, Generate HTML Report, Send Report.\n\n**3. Edit your branding** \u2192 open the *Generate HTML Report* node and replace the contact placeholder text in the prompt with Baron AI's real email/phone/website.\n\n**4. Activate the workflow** (toggle top-right).\n\n**5. Get your form link** \u2192 open *Audit Request Form* node \u2192 copy the Production URL. That link is your audit intake \u2014 bookmark it.\n\n\ud83d\udcb7 Cost per full audit: roughly \u00a31\u2013\u00a32.50 in API fees across all 3 engines.",
+        "height": 620,
+        "width": 420,
+        "color": 4
+      },
+      "id": "audit-note-readme",
+      "name": "Note - Read Me First (Audit)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        2860
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udccb Intake + Prompt Builder\n\n**Audit Request Form** \u2014 no changes needed. Fill it per prospect/client. Business Name must match how they appear publicly online (this is what mention-detection looks for).\n\n**Build Prompts** \u2014 generates up to 18 questions from the form. Things you can safely edit inside the code:\n- The question templates (the 3 lines starting `prompts.push(...)`) \u2014 reword to match how real customers in your niche talk.\n- `.slice(0, 4)` \u2014 max services used (raise = more prompts = higher cost).\n- `.slice(0, 18)` \u2014 total prompt cap.\n\n\u26a0\ufe0f Keep prompts identical month-to-month for the same client \u2014 that's what makes before/after scores comparable.",
+        "height": 420,
+        "width": 380,
+        "color": 5
+      },
+      "id": "audit-note-intake",
+      "name": "Note - Intake and Prompts (Audit)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        2860
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83e\udd16 The 3 AI Engines\n\nEach prompt is asked on **Claude** (with live web search), **Perplexity** (sonar \u2014 web-grounded by default), and **ChatGPT** (OpenAI Responses API with web search).\n\n**Credentials:** each node uses its own Header Auth credential \u2014 see Read Me note.\n\n**Batching:** requests run 2-at-a-time with a 1.5s gap to avoid rate limits. If you hit 429 errors, raise `batchInterval` to 3000 in the node's Options \u2192 Batching.\n\n**Don't have all 3 API keys yet?** You can delete an engine branch (e.g. Ask ChatGPT + Normalise ChatGPT Answer), then open *Merge Answers* and reduce **Number of Inputs** from 3 \u2192 2. The rest still works.\n\n\u26a0\ufe0f Reality check: these APIs are close *proxies* for the consumer apps, not exact copies. For cold outreach, still manually screenshot 2\u20133 prompts in the real ChatGPT app \u2014 the screenshot is your hook, this workflow is the depth behind it.",
+        "height": 520,
+        "width": 400,
+        "color": 6
+      },
+      "id": "audit-note-engines",
+      "name": "Note - AI Engines (Audit)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        2620
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udd0d Analysis + Scoring\n\n**Analyse Mentions** \u2014 sends all 3 answers per question to Claude, which returns strict JSON: mentioned yes/no, list position, sentiment, competitors recommended instead, and the single best quote for your sales pitch. No changes needed.\n\n**Aggregate Results** \u2014 computes:\n- Visibility rate % per engine\n- Top 8 competitors AI recommends instead (with counts)\n- Question-by-question rows for the report table\n\n\u2705 Before sending a report to a *paying* client, skim the question-by-question table \u2014 mention detection is very good but not perfect (oddly-phrased mentions occasionally slip through).",
+        "height": 400,
+        "width": 380,
+        "color": 3
+      },
+      "id": "audit-note-analysis",
+      "name": "Note - Analysis (Audit)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1060,
+        2700
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udcc4 Report + Delivery\n\n**Generate HTML Report** \u2014 Claude writes a full client-ready HTML report (scorecard, competitor table, question-by-question results, next steps, disclaimer).\n\n\ud83d\udd8a **EDIT THIS NODE:** in the prompt, replace `Baron AI Solutions LTD contact placeholder` with your real contact details. You can also tweak the colour palette instruction (currently dark navy + white) to match your brand.\n\n**Send Report** \u2014 emails the HTML to whatever address was entered in the form. Use YOUR email for prospect audits (you forward it with your pitch); the client's email for monthly retainer reports.\n\n\ud83d\udca1 Upgrade later: pipe the HTML through Gotenberg (free, self-hosted) to attach a PDF instead \u2014 feels more like a \u00a3297 deliverable.",
+        "height": 440,
+        "width": 380,
+        "color": 7
+      },
+      "id": "audit-note-delivery",
+      "name": "Note - Report and Delivery (Audit)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        2680
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udd01 Retainer Version (later)\n\nWhen clients are paying monthly:\n1. Duplicate this workflow\n2. Replace the Form Trigger with a **Schedule Trigger** (1st of month, 07:00 Europe/London)\n3. Add a **Google Sheets** node reading a Clients sheet (same columns as the form)\n4. Change every `$('Audit Input')` reference in the code/HTTP nodes to point at the Sheets data\n5. Append each month's scores to a history tab \u2192 that history chart is why clients don't cancel.\n\n\u26a0\ufe0f Sales language: never promise guaranteed AI placement. Sell measurement + systematic improvement. The report footer already includes the disclaimer.",
+        "height": 380,
+        "width": 380,
+        "color": 2
+      },
+      "id": "audit-note-retainer",
+      "name": "Note - Retainer Version (Audit)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        2740
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "AI Visibility Audit",
+        "formDescription": "Enter the business details to run an AI visibility audit. The report is emailed automatically when finished.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Business Name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Town / City",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "County / Wider Area",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Services (comma separated)",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Known Competitors (comma separated)",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Report Recipient Email",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "audit-form-trigger-001",
+      "name": "Audit Request Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -200,
+        3360
+      ],
+      "notes": "Your audit intake. Copy the Production URL after activating the workflow. Business Name must match how the business appears publicly online.",
+      "webhookId": "baron-geo-audit-form"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// BUILD PROMPTS\n// Turns the form input into up to 18 buyer-intent questions.\n// EDITABLE: the question templates below, the service cap\n// (.slice(0, 4)) and the total cap (.slice(0, 18)).\n// Keep templates IDENTICAL month-to-month per client so\n// visibility scores stay comparable.\n// ============================================================\nconst form = $input.first().json;\nconst business = (form['Business Name'] || '').trim();\nconst town = (form['Town / City'] || '').trim();\nconst county = (form['County / Wider Area'] || '').trim();\nconst services = (form['Services (comma separated)'] || '')\n  .split(',')\n  .map(s => s.trim())\n  .filter(Boolean)\n  .slice(0, 4); // cap at 4 services to control cost\n\nconst prompts = [];\n\n// --- Buyer-intent prompts per service (edit wording freely) ---\nfor (const service of services) {\n  prompts.push({ prompt: `Who is the best ${service} in ${town}?`, category: 'buyer-intent' });\n  prompts.push({ prompt: `I need a ${service} in ${town}. Who do you recommend and why?`, category: 'buyer-intent' });\n  prompts.push({ prompt: `Recommend a reliable, well-reviewed ${service} near ${town}.`, category: 'buyer-intent' });\n}\n\n// --- Wider-area prompt ---\nif (county && services.length > 0) {\n  prompts.push({ prompt: `Best ${services[0]} in ${county}?`, category: 'buyer-intent-wide' });\n}\n\n// --- Brand-reputation prompts ---\nprompts.push({ prompt: `Is ${business} in ${town} any good? What do people say about them?`, category: 'brand' });\nprompts.push({ prompt: `Tell me about ${business}, ${town}. What services do they offer and are they reputable?`, category: 'brand' });\n\n// --- Cap total prompts ---\nconst capped = prompts.slice(0, 18);\n\nreturn capped.map((p, i) => ({\n  json: {\n    index: i,\n    prompt: p.prompt,\n    category: p.category,\n    business,\n    town\n  }\n}));"
+      },
+      "id": "audit-build-prompts-002",
+      "name": "Build Prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        3360
+      ],
+      "notes": "Generates up to 18 questions. Edit the templates inside \u2014 comments in the code show what's safe to change."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 1024, \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify($json.prompt) }}}], \"tools\": [{\"type\": \"web_search_20250305\", \"name\": \"web_search\", \"max_uses\": 3}] }",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1500
+            }
+          }
+        }
+      },
+      "id": "audit-ask-claude-003",
+      "name": "Ask Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        3160
+      ],
+      "notes": "CREDENTIAL NEEDED: Header Auth \u2192 Name: x-api-key, Value: your Anthropic API key. Uses Claude with live web search (max 3 searches per question).",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Anthropic API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extracts the plain-text answer from Claude's response\n// and re-attaches the original prompt. No changes needed.\nconst src = $('Build Prompts').item.json;\nconst blocks = $json.content || [];\nconst answer = blocks\n  .filter(b => b.type === 'text')\n  .map(b => b.text)\n  .join('\\n')\n  .trim();\n\nreturn {\n  json: {\n    index: src.index,\n    prompt: src.prompt,\n    category: src.category,\n    claude_answer: answer || '(no answer returned)'\n  }\n};"
+      },
+      "id": "audit-norm-claude-004",
+      "name": "Normalise Claude Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        3160
+      ],
+      "notes": "No changes needed."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.perplexity.ai/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"model\": \"sonar\", \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify($json.prompt) }}}] }",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1500
+            }
+          }
+        }
+      },
+      "id": "audit-ask-pplx-005",
+      "name": "Ask Perplexity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        3360
+      ],
+      "notes": "CREDENTIAL NEEDED: Header Auth \u2192 Name: Authorization, Value: 'Bearer pplx-xxxx'. Get a key at perplexity.ai/settings/api. Sonar model is web-grounded by default.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Perplexity API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extracts the plain-text answer from Perplexity's response.\n// No changes needed.\nconst src = $('Build Prompts').item.json;\nconst answer = ($json.choices && $json.choices[0] && $json.choices[0].message)\n  ? $json.choices[0].message.content\n  : '';\n\nreturn {\n  json: {\n    index: src.index,\n    perplexity_answer: (answer || '(no answer returned)').trim()\n  }\n};"
+      },
+      "id": "audit-norm-pplx-006",
+      "name": "Normalise Perplexity Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        3360
+      ],
+      "notes": "No changes needed."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"model\": \"gpt-4o\", \"tools\": [{\"type\": \"web_search\"}], \"input\": {{ JSON.stringify($json.prompt) }} }",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1500
+            }
+          }
+        }
+      },
+      "id": "audit-ask-gpt-007",
+      "name": "Ask ChatGPT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        3560
+      ],
+      "notes": "CREDENTIAL NEEDED: Header Auth \u2192 Name: Authorization, Value: 'Bearer sk-xxxx'. Get a key at platform.openai.com. Uses the Responses API with web search \u2014 the closest API proxy to the ChatGPT app.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "OpenAI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extracts the plain-text answer from OpenAI's Responses API\n// output. No changes needed.\nconst src = $('Build Prompts').item.json;\nconst out = $json.output || [];\nlet answer = '';\nfor (const o of out) {\n  if (o.type === 'message' && Array.isArray(o.content)) {\n    answer += o.content\n      .filter(c => c.type === 'output_text')\n      .map(c => c.text)\n      .join('\\n');\n  }\n}\n\nreturn {\n  json: {\n    index: src.index,\n    chatgpt_answer: (answer || '(no answer returned)').trim()\n  }\n};"
+      },
+      "id": "audit-norm-gpt-008",
+      "name": "Normalise ChatGPT Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        3560
+      ],
+      "notes": "No changes needed."
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 3,
+        "options": {}
+      },
+      "id": "audit-merge-009",
+      "name": "Merge Answers",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        820,
+        3360
+      ],
+      "notes": "Combines the 3 engines' answers per question. If you remove an engine branch, reduce Number of Inputs here to match."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 900, \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify('You are an AI-visibility analyst. Business being audited: ' + $('Audit Input').first().json['Business Name'] + ' in ' + $('Audit Input').first().json['Town / City'] + '. Known competitors: ' + ($('Audit Input').first().json['Known Competitors (comma separated)'] || 'none listed') + '.\\n\\nBelow are three AI-generated answers to the consumer question: ' + $json.prompt + '\\n\\n--- ANSWER A (Claude) ---\\n' + ($json.claude_answer || '(no answer)') + '\\n\\n--- ANSWER B (Perplexity) ---\\n' + ($json.perplexity_answer || '(no answer)') + '\\n\\n--- ANSWER C (ChatGPT) ---\\n' + ($json.chatgpt_answer || '(no answer)') + '\\n\\nAnalyse whether the audited business is mentioned or recommended in each answer. Return ONLY valid JSON, no markdown fences, no commentary, with this exact shape: {\"claude\": {\"mentioned\": true/false, \"position\": number or null, \"sentiment\": \"positive\" or \"neutral\" or \"negative\" or null, \"competitors_mentioned\": [\"name\", ...]}, \"perplexity\": {\"mentioned\": true/false, \"position\": number or null, \"sentiment\": \"positive\" or \"neutral\" or \"negative\" or null, \"competitors_mentioned\": [\"name\", ...]}, \"chatgpt\": {\"mentioned\": true/false, \"position\": number or null, \"sentiment\": \"positive\" or \"neutral\" or \"negative\" or null, \"competitors_mentioned\": [\"name\", ...]}, \"key_quote\": \"the single most useful sentence from any answer for a sales pitch\"}. position means where the audited business appears in any recommended list (1 = recommended first), null if not mentioned. competitors_mentioned means other business names recommended instead of the audited business.') }}}] }",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1500
+            }
+          }
+        }
+      },
+      "id": "audit-analyse-010",
+      "name": "Analyse Mentions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1060,
+        3360
+      ],
+      "notes": "CREDENTIAL NEEDED: same Anthropic Header Auth credential as Ask Claude. Analyses all 3 answers per question and returns structured JSON.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Anthropic API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// AGGREGATE RESULTS\n// Parses each analysis, computes visibility scores per engine,\n// and ranks the competitors AI recommends instead.\n// No changes needed.\n// ============================================================\nconst analyses = $input.all();\nconst merged = $('Merge Answers').all();\nconst form = $('Audit Input').first().json;\n\nconst rows = [];\nlet claudeMentions = 0;\nlet pplxMentions = 0;\nlet gptMentions = 0;\nconst competitorCount = {};\n\nfor (let i = 0; i < analyses.length; i++) {\n  const resp = analyses[i].json;\n  const blocks = resp.content || [];\n  let text = blocks.filter(b => b.type === 'text').map(b => b.text).join('\\n').trim();\n  text = text.replace(/```json/gi, '').replace(/```/g, '').trim();\n\n  let a = null;\n  try { a = JSON.parse(text); } catch (e) { a = null; }\n\n  const src = merged[i] ? merged[i].json : {};\n\n  if (a) {\n    if (a.claude && a.claude.mentioned) claudeMentions++;\n    if (a.perplexity && a.perplexity.mentioned) pplxMentions++;\n    if (a.chatgpt && a.chatgpt.mentioned) gptMentions++;\n    const comps = []\n      .concat((a.claude && a.claude.competitors_mentioned) || [])\n      .concat((a.perplexity && a.perplexity.competitors_mentioned) || [])\n      .concat((a.chatgpt && a.chatgpt.competitors_mentioned) || []);\n    for (const c of comps) {\n      const k = String(c).trim();\n      if (k) competitorCount[k] = (competitorCount[k] || 0) + 1;\n    }\n  }\n\n  rows.push({\n    prompt: src.prompt || '(unknown prompt)',\n    category: src.category || '',\n    analysis: a\n  });\n}\n\nconst total = analyses.length;\nconst topCompetitors = Object.entries(competitorCount)\n  .sort((x, y) => y[1] - x[1])\n  .slice(0, 8)\n  .map(([name, count]) => ({ name, count }));\n\nreturn [{\n  json: {\n    business: form['Business Name'],\n    town: form['Town / City'],\n    audit_date: new Date().toISOString().slice(0, 10),\n    total_prompts: total,\n    claude_mentions: claudeMentions,\n    perplexity_mentions: pplxMentions,\n    chatgpt_mentions: gptMentions,\n    claude_visibility_rate: total ? Math.round((100 * claudeMentions) / total) : 0,\n    perplexity_visibility_rate: total ? Math.round((100 * pplxMentions) / total) : 0,\n    chatgpt_visibility_rate: total ? Math.round((100 * gptMentions) / total) : 0,\n    top_competitors: topCompetitors,\n    rows\n  }\n}];"
+      },
+      "id": "audit-aggregate-011",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        3360
+      ],
+      "notes": "Computes the visibility scores. No changes needed. Skim its output before sending a report to a paying client."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"model\": \"claude-sonnet-4-6\", \"max_tokens\": 4000, \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify('You are generating a client-facing AI Visibility Audit report for Baron AI Solutions LTD, a UK agency. Audience: a small business owner with no technical knowledge. Tone: clear, professional, no jargon, no hype.\\n\\nProduce a COMPLETE standalone HTML document (inline CSS only, clean modern design, dark navy and white palette, works in an email client). Return ONLY the HTML, no markdown fences, no commentary.\\n\\nStructure: 1) Header with report title, business name, town, audit date, and Baron AI Solutions branding text. 2) Headline scorecard: visibility rate on each of the three AI engines (ChatGPT, Claude, Perplexity) as big percentages with a one-line plain-English verdict. 3) What this means: 3-4 sentences explaining that customers now ask AI tools who to hire and this report shows how often the business is recommended. 4) Competitors AI recommends instead: table of top competitors with mention counts. 5) Question-by-question results: a table with the question asked, whether the business was mentioned on each engine (tick/cross), and sentiment. 6) Key finding: use the most damaging or most useful key_quote from the data. 7) Recommended next steps: 4-5 bullet actions (website answer-readiness, schema markup, review generation, third-party citations, consistent listings) framed as what Baron AI Solutions would do in a monthly programme. 8) Footer: Baron AI Solutions LTD contact placeholder and a disclaimer that AI answers vary over time and by user, and no agency can guarantee specific AI recommendations.\\n\\nAudit data (JSON): ' + JSON.stringify($json)) }}}] }",
+        "options": {}
+      },
+      "id": "audit-report-012",
+      "name": "Generate HTML Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        3360
+      ],
+      "notes": "CREDENTIAL NEEDED: same Anthropic Header Auth credential. EDIT THE PROMPT: replace 'Baron AI Solutions LTD contact placeholder' with your real email/phone/website, and adjust the colour palette line to your brand.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Anthropic API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Pulls the HTML out of Claude's response and prepares the\n// email fields. No changes needed.\nconst blocks = $json.content || [];\nlet html = blocks.filter(b => b.type === 'text').map(b => b.text).join('\\n').trim();\nhtml = html.replace(/^```html\\s*/i, '').replace(/```\\s*$/,'').trim();\n\nconst form = $('Audit Input').first().json;\n\nreturn {\n  json: {\n    html,\n    subject: 'AI Visibility Audit \u2014 ' + form['Business Name'] + ' (' + form['Town / City'] + ')',\n    to: form['Report Recipient Email']\n  }\n};"
+      },
+      "id": "audit-extract-013",
+      "name": "Extract Report HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        3360
+      ],
+      "notes": "No changes needed."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "audit-gmail-014",
+      "name": "Send Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2020,
+        3360
+      ],
+      "notes": "CREDENTIAL NEEDED: Gmail OAuth2. Sends the HTML report to the email entered in the form.",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// AUDIT INPUT (bridge node)\n// The audit can now be started TWO ways:\n//  1. MANUAL (default): open the Audit Request Form URL and\n//     submit a business - e.g. a Hot Lead you picked from the\n//     leads sheet.\n//  2. AUTO: if AUTO_AUDIT_HOT_LEADS is true in the config,\n//     the top Hot Lead of each lead-finder run is fed in here\n//     automatically (never in testing mode).\n// Both paths deliver the same field names, so the audit\n// below runs unchanged. No changes needed.\n// ============================================================\nconst j = $input.first().json;\nreturn [{ json: {\n  'Business Name': j['Business Name'] || '',\n  'Town / City': j['Town / City'] || '',\n  'County / Wider Area': j['County / Wider Area'] || '',\n  'Services (comma separated)': j['Services (comma separated)'] || '',\n  'Known Competitors (comma separated)': j['Known Competitors (comma separated)'] || '',\n  'Report Recipient Email': j['Report Recipient Email'] || ''\n} }];"
+      },
+      "id": "audit-input-000",
+      "name": "Audit Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        3360
+      ],
+      "notes": "Bridge: the audit starts from the form (manual, default) or from the lead finder (auto, optional). No changes needed."
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "EDIT THIS SECTION FIRST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger (Weekly - DISABLED)": {
+      "main": [
+        [
+          {
+            "node": "EDIT THIS SECTION FIRST",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EDIT THIS SECTION FIRST": {
+      "main": [
+        [
+          {
+            "node": "Search Google Places (Text Search)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Google Places (Text Search)": {
+      "main": [
+        [
+          {
+            "node": "Read Existing Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Existing Leads": {
+      "main": [
+        [
+          {
+            "node": "Prepare & Normalise Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare & Normalise Leads": {
+      "main": [
+        [
+          {
+            "node": "Has Website?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Website?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Website",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Score Lead (No Website)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Website": {
+      "main": [
+        [
+          {
+            "node": "Analyse Website & Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse Website & Score": {
+      "main": [
+        [
+          {
+            "node": "Merge Website Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Lead (No Website)": {
+      "main": [
+        [
+          {
+            "node": "Merge Website Checks",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Website Checks": {
+      "main": [
+        [
+          {
+            "node": "AI Lead Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Lead Analyst": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Verdict": {
+      "main": [
+        [
+          {
+            "node": "Prepare Sheet Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Sheet Row": {
+      "main": [
+        [
+          {
+            "node": "Save Leads To Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Leads To Sheet": {
+      "main": [
+        [
+          {
+            "node": "Build Run Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Auto-Audit Enabled?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Run Summary": {
+      "main": [
+        [
+          {
+            "node": "Email Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Run Summary": {
+      "main": [
+        [
+          {
+            "node": "Telegram Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Audit Enabled?": {
+      "main": [
+        [
+          {
+            "node": "Pick Top Hot Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Pick Top Hot Lead": {
+      "main": [
+        [
+          {
+            "node": "Audit Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Request Form": {
+      "main": [
+        [
+          {
+            "node": "Audit Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompts": {
+      "main": [
+        [
+          {
+            "node": "Ask Claude",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ask Perplexity",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ask ChatGPT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Claude": {
+      "main": [
+        [
+          {
+            "node": "Normalise Claude Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Perplexity": {
+      "main": [
+        [
+          {
+            "node": "Normalise Perplexity Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask ChatGPT": {
+      "main": [
+        [
+          {
+            "node": "Normalise ChatGPT Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise Claude Answer": {
+      "main": [
+        [
+          {
+            "node": "Merge Answers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise Perplexity Answer": {
+      "main": [
+        [
+          {
+            "node": "Merge Answers",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Normalise ChatGPT Answer": {
+      "main": [
+        [
+          {
+            "node": "Merge Answers",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Answers": {
+      "main": [
+        [
+          {
+            "node": "Analyse Mentions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse Mentions": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Generate HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Extract Report HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Report HTML": {
+      "main": [
+        [
+          {
+            "node": "Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Input": {
+      "main": [
+        [
+          {
+            "node": "Build Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
