@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    name: Validate workflow export
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JSON files
+        run: |
+          for f in *.json; do
+            python3 -m json.tool "$f" > /dev/null && echo "valid: $f"
+          done
+
+      - name: Scan for committed secrets
+        run: |
+          if grep -rEn "(sk-[A-Za-z0-9_-]{20,}|pplx-[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|xox[bp]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{30,})" --include='*.json' --include='*.md' .; then
+            echo "Possible secret found - remove it and rotate the key."
+            exit 1
+          fi
+          echo "No known secret patterns found."
