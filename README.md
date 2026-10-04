@@ -164,4 +164,4 @@ My next priorities would be verified write results, explicit empty-run handling,
 
 ## Project status
 
-This README describes the supplied JSON configuration. No live execution, external messages or production validation were performed during this review. The file does not provide evidence of leads converted or client visibility improvements.
+Prototype. The JSON export in this repository is the complete workflow, and CI checks on every push that it is valid JSON with no committed API keys. Testing mode is on by default and nothing is sent to prospects: outreach is saved as drafts for review. The points under Known limitations and next work are the open work, and I make no claims here about leads converted or client results.
